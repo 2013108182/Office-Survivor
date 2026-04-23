@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Heart, Clock, Zap, Shield, Coffee, TrendingUp,
   Skull, Trophy, Play, RefreshCw, ChevronUp, Keyboard, Magnet,
-  Paperclip, MousePointer2
+  Paperclip, MousePointer2, CloudLightning, Undo, Flame, Disc
 } from 'lucide-react';
 
 // --- 스킬 메타 데이터 ---
@@ -11,8 +11,8 @@ const SKILLS = {
     id: 'coffee', name: '아메리카노 수혈', desc: '자동 발사. 연사력과 화력이 증가합니다.',
     max: 5, icon: Coffee, color: 'text-amber-400', border: 'border-amber-400/50', bg: 'bg-amber-400/10', unlockDay: 1
   },
-  vlookup: {
-    id: 'vlookup', name: 'VLOOKUP 광역기', desc: '데이터를 스캔하여 주변 적에게 지속 피해를 줍니다.',
+  xlookup: {
+    id: 'xlookup', name: 'xlookup 광역기', desc: '데이터를 스캔하여 주변 적에게 지속 피해를 줍니다.',
     max: 5, icon: Zap, color: 'text-blue-400', border: 'border-blue-400/50', bg: 'bg-blue-400/10', unlockDay: 2
   },
   stapler: {
@@ -23,23 +23,77 @@ const SKILLS = {
     id: 'mouse', name: '무선 마우스', desc: '플레이어 주변을 회전하는 마우스를 소환합니다.',
     max: 5, icon: MousePointer2, color: 'text-slate-400', border: 'border-slate-400/50', bg: 'bg-slate-400/10', unlockDay: 3
   },
+  lightning: {
+    id: 'lightning', name: '긴급 호출 (낙뢰)', desc: '랜덤한 적에게 벼락을 떨어뜨려 광역 피해를 줍니다.',
+    max: 5, icon: CloudLightning, color: 'text-yellow-300', border: 'border-yellow-300/50', bg: 'bg-yellow-300/10', unlockDay: 3
+  },
+  boomerang: {
+    id: 'boomerang', name: '반려된 기획서', desc: '날아갔다가 플레이어에게 되돌아오는 부메랑을 던집니다.',
+    max: 5, icon: Undo, color: 'text-orange-400', border: 'border-orange-400/50', bg: 'bg-orange-400/10', unlockDay: 4
+  },
   shield: {
     id: 'shield', name: '메신저 읽씹', desc: '공격을 1회 방어하는 쉴드를 생성합니다.',
     max: 3, icon: Shield, color: 'text-cyan-400', border: 'border-cyan-400/50', bg: 'bg-cyan-400/10', unlockDay: 3
   },
-  speed: {
-    id: 'speed', name: '칼퇴 본능', desc: '마음이 급해져 이동 속도가 대폭 상승합니다.',
-    max: 3, icon: TrendingUp, color: 'text-emerald-400', border: 'border-emerald-400/50', bg: 'bg-emerald-400/10', unlockDay: 1
+  molotov: {
+    id: 'molotov', name: '분노의 야근 (화염병)', desc: '지면에 일정 시간 유지되는 불길 장판을 생성합니다.',
+    max: 5, icon: Flame, color: 'text-red-500', border: 'border-red-500/50', bg: 'bg-red-500/10', unlockDay: 4
+  },
+  soccer: {
+    id: 'soccer', name: '탕비실 텀블러', desc: '화면과 적에게 튕기며 물리 피해를 주는 텀블러를 던집니다.',
+    max: 5, icon: Disc, color: 'text-zinc-300', border: 'border-zinc-300/50', bg: 'bg-zinc-300/10', unlockDay: 5
   },
   magnet: {
     id: 'magnet', name: '끌어당김의 법칙', desc: '경험치(서류)를 끌어당기는 범위가 대폭 넓어집니다.',
     max: 5, icon: Magnet, color: 'text-purple-400', border: 'border-purple-400/50', bg: 'bg-purple-400/10', unlockDay: 4
+  },
+  speed: {
+    id: 'speed', name: '칼퇴 본능', desc: '마음이 급해져 이동 속도가 대폭 상승합니다.',
+    max: 3, icon: TrendingUp, color: 'text-emerald-400', border: 'border-emerald-400/50', bg: 'bg-emerald-400/10', unlockDay: 1
   },
   keyboard: {
     id: 'keyboard', name: '키보드 샷건', desc: '주기적으로 8방향으로 사직서를 날립니다.',
     max: 5, icon: Keyboard, color: 'text-indigo-400', border: 'border-indigo-400/50', bg: 'bg-indigo-400/10', unlockDay: 5
   }
 };
+
+// --- Area Of Effect (장판 스킬) ---
+class AreaOfEffect {
+  constructor(x, y, radius, damage, duration, emoji, color) {
+    this.x = x; this.y = y; this.radius = radius;
+    this.damage = damage; this.duration = duration;
+    this.maxDuration = duration;
+    this.emoji = emoji; this.color = color;
+    this.tickTimer = 0;
+  }
+  update(dt, engine) {
+    this.duration -= dt;
+    if (this.duration <= 0) return false;
+
+    this.tickTimer += dt;
+    if (this.tickTimer >= 30) { // 0.5초(30프레임)마다 타격
+      this.tickTimer = 0;
+      engine.enemies.forEach(e => {
+        if (Math.hypot(e.x - this.x, e.y - this.y) < this.radius + e.size) {
+          e.takeDamage(this.damage, engine);
+        }
+      });
+    }
+    return true;
+  }
+  draw(ctx) {
+    ctx.globalAlpha = Math.min(1, this.duration / 30);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.fillStyle = this.color;
+    ctx.fill();
+    ctx.font = '28px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.emoji, this.x, this.y);
+    ctx.globalAlpha = 1;
+  }
+}
 
 // --- 게임 엔진 (Canvas Logic) ---
 class GameEngine {
@@ -68,6 +122,7 @@ class GameEngine {
     this.player = new Player(0, 0, this, initialStats);
     this.enemies = [];
     this.projectiles = [];
+    this.aoes = [];
     this.gems = [];
     this.particles = [];
     this.texts = [];
@@ -159,7 +214,6 @@ class GameEngine {
     this.lastTime = now;
     this.frameCount++;
     
-    // 기기 주사율에 따른 속도 차이를 방지 (60FPS 기준을 1.0으로 정규화)
     const dt = Math.min(deltaTime / 16.666, 3);
 
     this.time += (deltaTime / 1000) * 12;
@@ -194,17 +248,24 @@ class GameEngine {
     if (this.spawnTimer >= spawnRate) {
       this.spawnTimer -= spawnRate;
       const rand = Math.random();
-      let type = 'spam'; // 기본 추격
-      if (rand > 0.90 - (progress * 0.2)) type = 'folder'; // 탱커
-      else if (rand > 0.70 - (this.day * 0.03)) type = 'slack'; // 대시
-      else if (this.day >= 3 && rand > 0.5) type = 'bug'; // 지그재그 패턴 (3일차부터 등장)
+      let type = 'spam';
+      if (rand > 0.90 - (progress * 0.2)) type = 'folder';
+      else if (rand > 0.70 - (this.day * 0.03)) type = 'slack';
+      else if (this.day >= 3 && rand > 0.5) type = 'bug';
 
       this.enemies.push(new Enemy(type, this.player.x, this.player.y, Math.max(this.width, this.height), progress, this.day));
     }
 
+    this.aoes = this.aoes.filter(a => a.update(dt, this));
+
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
-      p.update(dt);
+      const alive = p.update(dt, this);
+      
+      if (!alive) {
+        this.projectiles.splice(i, 1);
+        continue;
+      }
 
       let remove = false;
       for (let j = this.enemies.length - 1; j >= 0; j--) {
@@ -213,14 +274,21 @@ class GameEngine {
           e.takeDamage(p.damage, this);
           p.hitIds.add(e.id);
           this.addParticle(p.x, p.y, '#fbbf24', 3);
-          p.pierce--;
-          if (p.pierce <= 0) {
-            remove = true;
-            break;
+          
+          if (p.type === 'soccer') {
+            // 튕기기 물리엔진 (간단화)
+            p.vx *= -1; p.vy *= -1;
+            p.hitIds.clear(); // 튕긴 후 다시 맞출 수 있게
+            p.pierce--;
+            if (p.pierce <= 0) remove = true;
+          } else if (p.type !== 'boomerang') {
+            p.pierce--;
+            if (p.pierce <= 0) remove = true;
           }
         }
       }
-      if (remove || p.isOutOfBounds(this.cameraX, this.cameraY, this.width, this.height)) {
+
+      if (remove || (p.type !== 'boomerang' && p.type !== 'soccer' && p.isOutOfBounds(this.cameraX, this.cameraY, this.width, this.height))) {
         this.projectiles.splice(i, 1);
       }
     }
@@ -275,6 +343,7 @@ class GameEngine {
     }
     this.ctx.stroke();
 
+    this.aoes.forEach(a => a.draw(this.ctx));
     this.gems.forEach(g => g.draw(this.ctx));
     this.enemies.forEach(e => e.draw(this.ctx));
     this.projectiles.forEach(p => p.draw(this.ctx));
@@ -322,8 +391,13 @@ class Player {
 
     this.coffeeCooldown = 0;
     this.staplerCooldown = 0;
-    this.vlookupAngle = 0;
-    this.vlookupTimer = 0;
+    this.lightningTimer = 0;
+    this.boomerangTimer = 0;
+    this.molotovTimer = 0;
+    this.soccerTimer = 0;
+
+    this.xlookupAngle = 0;
+    this.xlookupTimer = 0;
     this.mouseAngle = 0;
     this.mouseHitTimer = 0;
     this.shieldActive = false;
@@ -368,7 +442,7 @@ class Player {
         const angle = Math.atan2(closest.y - this.y, closest.x - this.x);
         const pSpeed = 8 + skills.coffee;
         const pDamage = 1 + (skills.coffee * 0.5);
-        this.engine.projectiles.push(new Projectile(this.x, this.y, angle, pSpeed, pDamage, '☕', 1));
+        this.engine.projectiles.push(new Projectile(this.x, this.y, angle, pSpeed, pDamage, '☕', 1, 'normal'));
         this.coffeeCooldown = Math.max(15, 60 - (skills.coffee * 10));
       }
     }
@@ -386,9 +460,72 @@ class Player {
           const angle = Math.atan2(closest.y - this.y, closest.x - this.x);
           const pDamage = 1.5 + (skills.stapler * 0.8);
           const pierce = 1 + skills.stapler;
-          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 9, pDamage, '📎', pierce));
+          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 9, pDamage, '📎', pierce, 'normal'));
           this.staplerCooldown = Math.max(40, 100 - (skills.stapler * 10));
         }
+      }
+    }
+
+    // [신규] 번개 발사기 (낙뢰)
+    if (skills.lightning > 0) {
+      this.lightningTimer += dt;
+      if (this.lightningTimer > 100 - (skills.lightning * 10)) {
+        this.lightningTimer = 0;
+        const target = this.engine.enemies[Math.floor(Math.random() * this.engine.enemies.length)];
+        if (target) {
+          const damage = 3 + skills.lightning * 1.5;
+          const radius = 60 + skills.lightning * 10;
+          this.engine.addParticle(target.x, target.y, '#facc15', 15);
+          this.engine.addText(target.x, target.y - 20, '⚡', '#facc15');
+          this.engine.enemies.forEach(e => {
+            if (Math.hypot(e.x - target.x, e.y - target.y) < radius) {
+              e.takeDamage(damage, this.engine);
+            }
+          });
+        }
+      }
+    }
+
+    // [신규] 부메랑
+    if (skills.boomerang > 0) {
+      this.boomerangTimer += dt;
+      if (this.boomerangTimer > 110 - (skills.boomerang * 12)) {
+        this.boomerangTimer = 0;
+        let closest = null, minDist = Infinity;
+        this.engine.enemies.forEach(e => {
+          const d = Math.hypot(e.x - this.x, e.y - this.y);
+          if (d < minDist) { minDist = d; closest = e; }
+        });
+        const angle = closest ? Math.atan2(closest.y - this.y, closest.x - this.x) : Math.random() * Math.PI * 2;
+        const damage = 1.5 + skills.boomerang * 0.8;
+        // pierce=Infinity, type='boomerang'
+        this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 10, damage, '🪃', Infinity, 'boomerang'));
+      }
+    }
+
+    // [신규] 화염병 (장판)
+    if (skills.molotov > 0) {
+      this.molotovTimer += dt;
+      if (this.molotovTimer > 160 - (skills.molotov * 15)) {
+        this.molotovTimer = 0;
+        const target = this.engine.enemies[Math.floor(Math.random() * this.engine.enemies.length)];
+        const targetX = target ? target.x : this.x;
+        const targetY = target ? target.y : this.y;
+        const damage = 0.5 + skills.molotov * 0.3;
+        const duration = 180 + skills.molotov * 30;
+        this.engine.aoes.push(new AreaOfEffect(targetX, targetY, 80, damage, duration, '🔥', 'rgba(239, 68, 68, 0.3)'));
+      }
+    }
+
+    // [신규] 축구공 (바운스)
+    if (skills.soccer > 0) {
+      this.soccerTimer += dt;
+      if (this.soccerTimer > 130 - (skills.soccer * 12)) {
+        this.soccerTimer = 0;
+        const angle = Math.random() * Math.PI * 2;
+        const damage = 2 + skills.soccer * 1;
+        const bounces = 3 + skills.soccer;
+        this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 8, damage, '⚽', bounces, 'soccer'));
       }
     }
 
@@ -400,19 +537,19 @@ class Player {
         const damage = 1 + (skills.keyboard * 0.5);
         for(let i=0; i<8; i++) {
           const angle = (Math.PI / 4) * i;
-          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 6, damage, '📄', 1));
+          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 6, damage, '📄', 1, 'normal'));
         }
       }
     }
 
-    // VLOOKUP (광역 오라)
-    if (skills.vlookup > 0) {
-      this.vlookupAngle += 0.05 * dt;
-      this.vlookupTimer += dt;
-      if (this.vlookupTimer >= 20) {
-        this.vlookupTimer -= 20;
-        const radius = 70 + (skills.vlookup * 25);
-        const damage = 0.5 + (skills.vlookup * 0.4);
+    // xlookup (광역 오라)
+    if (skills.xlookup > 0) {
+      this.xlookupAngle += 0.05 * dt;
+      this.xlookupTimer += dt;
+      if (this.xlookupTimer >= 20) {
+        this.xlookupTimer -= 20;
+        const radius = 70 + (skills.xlookup * 25);
+        const damage = 0.5 + (skills.xlookup * 0.4);
         this.engine.enemies.forEach(e => {
           if (Math.hypot(e.x - this.x, e.y - this.y) < radius + e.size) {
             e.takeDamage(damage, this.engine);
@@ -459,12 +596,11 @@ class Player {
   draw(ctx) {
     const skills = this.engine.getSkills();
 
-    // VLOOKUP 오라 그리기
-    if (skills.vlookup > 0) {
-      const radius = 70 + (skills.vlookup * 25);
+    if (skills.xlookup > 0) {
+      const radius = 70 + (skills.xlookup * 25);
       ctx.save();
       ctx.translate(this.x, this.y);
-      ctx.rotate(this.vlookupAngle);
+      ctx.rotate(this.xlookupAngle);
 
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
@@ -480,7 +616,6 @@ class Player {
       ctx.restore();
     }
 
-    // 무선 마우스 그리기
     if (skills.mouse > 0) {
       const count = skills.mouse;
       const radius = 60 + skills.mouse * 5;
@@ -495,7 +630,6 @@ class Player {
       }
     }
 
-    // 쉴드 그리기
     if (this.shieldActive) {
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.size + 12, 0, Math.PI * 2);
@@ -507,7 +641,6 @@ class Player {
       ctx.shadowBlur = 0;
     }
 
-    // 캐릭터 그리기
     const bounce = Math.sin(this.engine.frameCount * 0.1) * 3;
     ctx.font = '32px Arial';
     ctx.textAlign = 'center';
@@ -546,7 +679,7 @@ class Player {
 
 class Enemy {
   constructor(type, playerX, playerY, maxScreenDim, progress, day) {
-    this.id = Math.random(); // 타격 판별용 고유 ID
+    this.id = Math.random();
     const angle = Math.random() * Math.PI * 2;
     const dist = maxScreenDim * 0.6;
     this.x = playerX + Math.cos(angle) * dist;
@@ -580,27 +713,25 @@ class Enemy {
   update(player, dt) {
     const angle = Math.atan2(player.y - this.y, player.x - this.x);
 
-    if (this.type === 'slack') { // 대시 몹 패턴
+    if (this.type === 'slack') { 
       this.stateTimer += dt;
       if (this.stateTimer < 60) {
-        // 천천히 이동하며 조준
         this.x += Math.cos(angle) * this.speed * 0.4 * dt;
         this.y += Math.sin(angle) * this.speed * 0.4 * dt;
         this.dashAngle = angle;
       } else if (this.stateTimer < 80) {
-        // 고정된 각도로 빠르게 대시
         this.x += Math.cos(this.dashAngle) * this.speed * 4.0 * dt;
         this.y += Math.sin(this.dashAngle) * this.speed * 4.0 * dt;
       } else {
         this.stateTimer = 0;
       }
-    } else if (this.type === 'bug') { // 사인파 지그재그 패턴
+    } else if (this.type === 'bug') { 
       this.waveTimer += 0.1 * dt;
       const waveAngle = angle + Math.PI / 2;
       const waveAmp = Math.sin(this.waveTimer) * 3.5;
       this.x += (Math.cos(angle) * this.speed + Math.cos(waveAngle) * waveAmp) * dt;
       this.y += (Math.sin(angle) * this.speed + Math.sin(waveAngle) * waveAmp) * dt;
-    } else { // 일반 추적
+    } else { 
       this.x += Math.cos(angle) * this.speed * dt;
       this.y += Math.sin(angle) * this.speed * dt;
     }
@@ -611,6 +742,16 @@ class Enemy {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(this.emoji, this.x, this.y);
+
+    // HP Bar (피격된 적만 표시)
+    if (this.hp < this.maxHp) {
+      const hpPercent = Math.max(0, this.hp / this.maxHp);
+      const barWidth = 30;
+      ctx.fillStyle = '#ef4444'; // 빨간색 배경
+      ctx.fillRect(this.x - barWidth/2, this.y - this.size - 10, barWidth, 4);
+      ctx.fillStyle = '#22c55e'; // 녹색 체력
+      ctx.fillRect(this.x - barWidth/2, this.y - this.size - 10, barWidth * hpPercent, 4);
+    }
   }
 
   takeDamage(amt, engine) {
@@ -620,27 +761,80 @@ class Enemy {
 }
 
 class Projectile {
-  constructor(x, y, angle, speed, damage, emoji = '☕', pierce = 1) {
+  constructor(x, y, angle, speed, damage, emoji = '☕', pierce = 1, type = 'normal') {
     this.x = x; this.y = y;
+    this.speed = speed;
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
     this.damage = damage;
     this.size = 10;
     this.emoji = emoji;
-    this.pierce = pierce; // 관통 가능 횟수
+    this.pierce = pierce; 
+    this.type = type;
     this.hitIds = new Set();
+    
+    // 특수 스킬 용 변수
+    this.lifeTimer = 40; // 부메랑 왕복 시간
+    this.returning = false;
   }
-  update(dt) {
+  
+  update(dt, engine) {
+    if (this.type === 'boomerang') {
+      this.lifeTimer -= dt;
+      if (this.lifeTimer <= 0 && !this.returning) {
+        this.returning = true;
+        this.hitIds.clear(); // 돌아올 때 다시 타격 가능
+      }
+      if (this.returning) {
+        const angle = Math.atan2(engine.player.y - this.y, engine.player.x - this.x);
+        this.vx = Math.cos(angle) * this.speed;
+        this.vy = Math.sin(angle) * this.speed;
+        // 플레이어에게 닿으면 소멸
+        if (Math.hypot(engine.player.x - this.x, engine.player.y - this.y) < 30) {
+          return false;
+        }
+      }
+    }
+
+    if (this.type === 'soccer') {
+      // 화면(카메라) 밖으로 나가면 튕김 처리
+      const cx = engine.cameraX;
+      const cy = engine.cameraY;
+      const w = engine.width;
+      const h = engine.height;
+
+      if (this.x < cx) { this.x = cx; this.vx *= -1; this.pierce--; this.hitIds.clear(); }
+      else if (this.x > cx + w) { this.x = cx + w; this.vx *= -1; this.pierce--; this.hitIds.clear(); }
+      
+      if (this.y < cy) { this.y = cy; this.vy *= -1; this.pierce--; this.hitIds.clear(); }
+      else if (this.y > cy + h) { this.y = cy + h; this.vy *= -1; this.pierce--; this.hitIds.clear(); }
+
+      if (this.pierce <= 0) return false;
+    }
+
     this.x += this.vx * dt;
     this.y += this.vy * dt;
+    return true; // 계속 살아있음
   }
+
   draw(ctx) {
     ctx.font = '22px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = '#d97706';
     ctx.shadowBlur = 10;
-    ctx.fillText(this.emoji, this.x, this.y);
+    
+    // 부메랑 회전 효과
+    if (this.type === 'boomerang') {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(Date.now() * 0.01);
+      ctx.fillText(this.emoji, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText(this.emoji, this.x, this.y);
+    }
+    
     ctx.shadowBlur = 0;
   }
   isOutOfBounds(cx, cy, w, h) {
@@ -745,8 +939,10 @@ export default function App() {
   const [time, setTime] = useState(540);
   const [xpData, setXpData] = useState({ xp: 0, maxXp: 8, level: 1 });
   
-  // 모든 스킬 초기값 추가
-  const [skills, setSkills] = useState({ coffee: 1, vlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0, stapler: 0, mouse: 0 });
+  const [skills, setSkills] = useState({ 
+    coffee: 1, xlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0, stapler: 0, mouse: 0,
+    lightning: 0, boomerang: 0, molotov: 0, soccer: 0
+  });
   const [levelUpChoices, setLevelUpChoices] = useState([]);
 
   const canvasRef = useRef(null);
@@ -809,7 +1005,10 @@ export default function App() {
   }, []);
 
   const startGame = useCallback(() => {
-    startDay(1, 10, { xp: 0, maxXp: 8, level: 1 }, { coffee: 1, vlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0, stapler: 0, mouse: 0 });
+    startDay(1, 10, { xp: 0, maxXp: 8, level: 1 }, { 
+      coffee: 1, xlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0, stapler: 0, mouse: 0,
+      lightning: 0, boomerang: 0, molotov: 0, soccer: 0 
+    });
   }, [startDay]);
 
   const nextDay = useCallback(() => {
