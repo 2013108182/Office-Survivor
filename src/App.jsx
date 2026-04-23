@@ -1,47 +1,58 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Heart, Clock, Zap, Shield, Coffee, TrendingUp,
-  Skull, Trophy, Play, RefreshCw, ChevronUp, Keyboard, Magnet
+  Skull, Trophy, Play, RefreshCw, ChevronUp, Keyboard, Magnet,
+  Paperclip, MousePointer2
 } from 'lucide-react';
 
 // --- 스킬 메타 데이터 ---
 const SKILLS = {
   coffee: {
     id: 'coffee', name: '아메리카노 수혈', desc: '자동 발사. 연사력과 화력이 증가합니다.',
-    max: 5, icon: Coffee, color: 'text-amber-400', border: 'border-amber-400/50', bg: 'bg-amber-400/10'
+    max: 5, icon: Coffee, color: 'text-amber-400', border: 'border-amber-400/50', bg: 'bg-amber-400/10', unlockDay: 1
   },
   vlookup: {
     id: 'vlookup', name: 'VLOOKUP 광역기', desc: '데이터를 스캔하여 주변 적에게 지속 피해를 줍니다.',
-    max: 5, icon: Zap, color: 'text-blue-400', border: 'border-blue-400/50', bg: 'bg-blue-400/10'
+    max: 5, icon: Zap, color: 'text-blue-400', border: 'border-blue-400/50', bg: 'bg-blue-400/10', unlockDay: 2
+  },
+  stapler: {
+    id: 'stapler', name: '결재 서류철', desc: '적을 관통하며 날아가는 서류철을 날립니다.',
+    max: 5, icon: Paperclip, color: 'text-rose-400', border: 'border-rose-400/50', bg: 'bg-rose-400/10', unlockDay: 2
+  },
+  mouse: {
+    id: 'mouse', name: '무선 마우스', desc: '플레이어 주변을 회전하는 마우스를 소환합니다.',
+    max: 5, icon: MousePointer2, color: 'text-slate-400', border: 'border-slate-400/50', bg: 'bg-slate-400/10', unlockDay: 3
   },
   shield: {
     id: 'shield', name: '메신저 읽씹', desc: '공격을 1회 방어하는 쉴드를 생성합니다.',
-    max: 3, icon: Shield, color: 'text-cyan-400', border: 'border-cyan-400/50', bg: 'bg-cyan-400/10'
+    max: 3, icon: Shield, color: 'text-cyan-400', border: 'border-cyan-400/50', bg: 'bg-cyan-400/10', unlockDay: 3
   },
   speed: {
     id: 'speed', name: '칼퇴 본능', desc: '마음이 급해져 이동 속도가 대폭 상승합니다.',
-    max: 3, icon: TrendingUp, color: 'text-emerald-400', border: 'border-emerald-400/50', bg: 'bg-emerald-400/10'
-  },
-  keyboard: {
-    id: 'keyboard', name: '키보드 샷건', desc: '주기적으로 8방향으로 사직서를 날립니다.',
-    max: 5, icon: Keyboard, color: 'text-indigo-400', border: 'border-indigo-400/50', bg: 'bg-indigo-400/10'
+    max: 3, icon: TrendingUp, color: 'text-emerald-400', border: 'border-emerald-400/50', bg: 'bg-emerald-400/10', unlockDay: 1
   },
   magnet: {
     id: 'magnet', name: '끌어당김의 법칙', desc: '경험치(서류)를 끌어당기는 범위가 대폭 넓어집니다.',
-    max: 5, icon: Magnet, color: 'text-purple-400', border: 'border-purple-400/50', bg: 'bg-purple-400/10'
+    max: 5, icon: Magnet, color: 'text-purple-400', border: 'border-purple-400/50', bg: 'bg-purple-400/10', unlockDay: 4
+  },
+  keyboard: {
+    id: 'keyboard', name: '키보드 샷건', desc: '주기적으로 8방향으로 사직서를 날립니다.',
+    max: 5, icon: Keyboard, color: 'text-indigo-400', border: 'border-indigo-400/50', bg: 'bg-indigo-400/10', unlockDay: 5
   }
 };
 
 // --- 게임 엔진 (Canvas Logic) ---
 class GameEngine {
-  constructor(canvas, callbacks, getSkills) {
+  constructor(canvas, callbacks, getSkills, day = 1, initialStats = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.callbacks = callbacks;
     this.getSkills = getSkills;
+    this.day = day;
 
     this.isRunning = false;
     this.lastTime = performance.now();
+    this.spawnTimer = 0;
     this.frameCount = 0;
 
     this.width = window.innerWidth;
@@ -54,7 +65,7 @@ class GameEngine {
     this.cameraX = 0;
     this.cameraY = 0;
 
-    this.player = new Player(0, 0, this);
+    this.player = new Player(0, 0, this, initialStats);
     this.enemies = [];
     this.projectiles = [];
     this.gems = [];
@@ -147,6 +158,9 @@ class GameEngine {
     const deltaTime = now - this.lastTime;
     this.lastTime = now;
     this.frameCount++;
+    
+    // 기기 주사율에 따른 속도 차이를 방지 (60FPS 기준을 1.0으로 정규화)
+    const dt = Math.min(deltaTime / 16.666, 3);
 
     this.time += (deltaTime / 1000) * 12;
 
@@ -160,46 +174,53 @@ class GameEngine {
       }
     }
 
-    this.update();
+    this.update(dt);
     this.draw();
 
     requestAnimationFrame((n) => this.loop(n));
   }
 
-  update() {
-    this.player.update();
+  update(dt) {
+    this.player.update(dt);
 
-    // 카메라 위치 (플레이어가 화면 중앙에 오도록)
     this.cameraX = this.player.x - this.width / 2;
     this.cameraY = this.player.y - this.height / 2;
 
     const progress = (this.time - 540) / (this.endTime - 540);
-    const spawnRate = Math.max(20, 80 - (progress * 60));
+    const dayFactor = (this.day - 1) * 3;
+    const spawnRate = Math.max(10, 80 - (progress * 60) - dayFactor);
 
-    if (this.frameCount % Math.floor(spawnRate) === 0) {
+    this.spawnTimer += dt;
+    if (this.spawnTimer >= spawnRate) {
+      this.spawnTimer -= spawnRate;
       const rand = Math.random();
-      let type = 'spam'; // 📧
-      if (rand > 0.85 - (progress * 0.3)) type = 'folder'; // 🗂️
-      else if (rand > 0.6) type = 'slack'; // 💬
+      let type = 'spam'; // 기본 추격
+      if (rand > 0.90 - (progress * 0.2)) type = 'folder'; // 탱커
+      else if (rand > 0.70 - (this.day * 0.03)) type = 'slack'; // 대시
+      else if (this.day >= 3 && rand > 0.5) type = 'bug'; // 지그재그 패턴 (3일차부터 등장)
 
-      this.enemies.push(new Enemy(type, this.player.x, this.player.y, Math.max(this.width, this.height), progress));
+      this.enemies.push(new Enemy(type, this.player.x, this.player.y, Math.max(this.width, this.height), progress, this.day));
     }
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
-      p.update();
+      p.update(dt);
 
-      let hit = false;
+      let remove = false;
       for (let j = this.enemies.length - 1; j >= 0; j--) {
         const e = this.enemies[j];
-        if (Math.hypot(p.x - e.x, p.y - e.y) < p.size + e.size) {
+        if (!p.hitIds.has(e.id) && Math.hypot(p.x - e.x, p.y - e.y) < p.size + e.size) {
           e.takeDamage(p.damage, this);
-          hit = true;
+          p.hitIds.add(e.id);
           this.addParticle(p.x, p.y, '#fbbf24', 3);
-          break;
+          p.pierce--;
+          if (p.pierce <= 0) {
+            remove = true;
+            break;
+          }
         }
       }
-      if (hit || p.isOutOfBounds(this.cameraX, this.cameraY, this.width, this.height)) {
+      if (remove || p.isOutOfBounds(this.cameraX, this.cameraY, this.width, this.height)) {
         this.projectiles.splice(i, 1);
       }
     }
@@ -212,7 +233,7 @@ class GameEngine {
         this.enemies.splice(i, 1);
         continue;
       }
-      e.update(this.player);
+      e.update(this.player, dt);
 
       if (Math.hypot(this.player.x - e.x, this.player.y - e.y) < e.size + this.player.size - 5) {
         this.player.takeDamage(1);
@@ -221,13 +242,13 @@ class GameEngine {
     }
 
     for (let i = this.gems.length - 1; i >= 0; i--) {
-      if (this.gems[i].update(this.player)) {
+      if (this.gems[i].update(this.player, dt)) {
         this.gems.splice(i, 1);
       }
     }
 
-    this.particles = this.particles.filter(p => p.update());
-    this.texts = this.texts.filter(t => t.update());
+    this.particles = this.particles.filter(p => p.update(dt));
+    this.texts = this.texts.filter(t => t.update(dt));
   }
 
   draw() {
@@ -237,7 +258,6 @@ class GameEngine {
     this.ctx.save();
     this.ctx.translate(-this.cameraX, -this.cameraY);
 
-    // 무한 배경
     this.ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
     this.ctx.lineWidth = 1;
     this.ctx.beginPath();
@@ -264,7 +284,6 @@ class GameEngine {
 
     this.ctx.restore();
 
-    // 가상 조이스틱
     if (this.pointer.active) {
       this.ctx.beginPath();
       this.ctx.arc(this.pointer.startX, this.pointer.startY, 50, 0, Math.PI * 2);
@@ -292,20 +311,27 @@ class GameEngine {
 }
 
 class Player {
-  constructor(x, y, engine) {
+  constructor(x, y, engine, initialStats = {}) {
     this.x = x; this.y = y; this.engine = engine;
     this.size = 20; this.baseSpeed = 3.5;
-    this.maxHp = 10; this.hp = 10;
-    this.xp = 0; this.maxXp = 8; this.level = 1;
+    this.maxHp = 10;
+    this.hp = initialStats.hp || 10;
+    this.xp = initialStats.xp || 0;
+    this.maxXp = initialStats.maxXp || 8;
+    this.level = initialStats.level || 1;
 
     this.coffeeCooldown = 0;
+    this.staplerCooldown = 0;
     this.vlookupAngle = 0;
+    this.vlookupTimer = 0;
+    this.mouseAngle = 0;
+    this.mouseHitTimer = 0;
     this.shieldActive = false;
     this.shieldCooldown = 0;
     this.keyboardTimer = 0;
   }
 
-  update() {
+  update(dt) {
     const skills = this.engine.getSkills();
     let dx = 0, dy = 0;
     const { keys, pointer } = this.engine;
@@ -327,10 +353,11 @@ class Player {
     }
 
     const speed = this.baseSpeed + (skills.speed * 0.7);
-    this.x += dx * speed;
-    this.y += dy * speed;
+    this.x += dx * speed * dt;
+    this.y += dy * speed * dt;
 
-    if (this.coffeeCooldown > 0) this.coffeeCooldown--;
+    // 아메리카노 (가장 가까운 적 기본 공격)
+    this.coffeeCooldown -= dt;
     if (this.coffeeCooldown <= 0 && this.engine.enemies.length > 0) {
       let closest = null, minDist = Infinity;
       this.engine.enemies.forEach(e => {
@@ -341,26 +368,49 @@ class Player {
         const angle = Math.atan2(closest.y - this.y, closest.x - this.x);
         const pSpeed = 8 + skills.coffee;
         const pDamage = 1 + (skills.coffee * 0.5);
-        this.engine.projectiles.push(new Projectile(this.x, this.y, angle, pSpeed, pDamage));
+        this.engine.projectiles.push(new Projectile(this.x, this.y, angle, pSpeed, pDamage, '☕', 1));
         this.coffeeCooldown = Math.max(15, 60 - (skills.coffee * 10));
       }
     }
 
+    // 결재 서류철 (관통 공격)
+    if (skills.stapler > 0) {
+      this.staplerCooldown -= dt;
+      if (this.staplerCooldown <= 0 && this.engine.enemies.length > 0) {
+        let closest = null, minDist = Infinity;
+        this.engine.enemies.forEach(e => {
+          const d = Math.hypot(e.x - this.x, e.y - this.y);
+          if (d < minDist) { minDist = d; closest = e; }
+        });
+        if (closest) {
+          const angle = Math.atan2(closest.y - this.y, closest.x - this.x);
+          const pDamage = 1.5 + (skills.stapler * 0.8);
+          const pierce = 1 + skills.stapler;
+          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 9, pDamage, '📎', pierce));
+          this.staplerCooldown = Math.max(40, 100 - (skills.stapler * 10));
+        }
+      }
+    }
+
+    // 키보드 샷건 (8방향)
     if (skills.keyboard > 0) {
-      this.keyboardTimer++;
+      this.keyboardTimer += dt;
       if (this.keyboardTimer > 120 - (skills.keyboard * 12)) {
         this.keyboardTimer = 0;
         const damage = 1 + (skills.keyboard * 0.5);
         for(let i=0; i<8; i++) {
           const angle = (Math.PI / 4) * i;
-          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 6, damage, '📄'));
+          this.engine.projectiles.push(new Projectile(this.x, this.y, angle, 6, damage, '📄', 1));
         }
       }
     }
 
+    // VLOOKUP (광역 오라)
     if (skills.vlookup > 0) {
-      this.vlookupAngle += 0.05;
-      if (this.engine.frameCount % 20 === 0) {
+      this.vlookupAngle += 0.05 * dt;
+      this.vlookupTimer += dt;
+      if (this.vlookupTimer >= 20) {
+        this.vlookupTimer -= 20;
         const radius = 70 + (skills.vlookup * 25);
         const damage = 0.5 + (skills.vlookup * 0.4);
         this.engine.enemies.forEach(e => {
@@ -372,8 +422,36 @@ class Player {
       }
     }
 
+    // 무선 마우스 (주위를 회전하는 궤도 공격)
+    if (skills.mouse > 0) {
+      this.mouseAngle += 0.08 * dt;
+      this.mouseHitTimer += dt;
+      const count = skills.mouse;
+      const radius = 60 + skills.mouse * 5;
+      const damage = 0.8 + skills.mouse * 0.4;
+      
+      const canHit = this.mouseHitTimer > 15;
+      if (canHit) this.mouseHitTimer = 0;
+
+      for (let i = 0; i < count; i++) {
+        const angle = this.mouseAngle + (Math.PI * 2 / count) * i;
+        const mx = this.x + Math.cos(angle) * radius;
+        const my = this.y + Math.sin(angle) * radius;
+
+        if (canHit) {
+          this.engine.enemies.forEach(e => {
+            if (Math.hypot(e.x - mx, e.y - my) < e.size + 15) {
+              e.takeDamage(damage, this.engine);
+              this.engine.addParticle(mx, my, '#94a3b8', 2);
+            }
+          });
+        }
+      }
+    }
+
+    // 쉴드
     if (skills.shield > 0 && !this.shieldActive) {
-      if (this.shieldCooldown > 0) this.shieldCooldown--;
+      if (this.shieldCooldown > 0) this.shieldCooldown -= dt;
       else this.shieldActive = true;
     }
   }
@@ -381,6 +459,7 @@ class Player {
   draw(ctx) {
     const skills = this.engine.getSkills();
 
+    // VLOOKUP 오라 그리기
     if (skills.vlookup > 0) {
       const radius = 70 + (skills.vlookup * 25);
       ctx.save();
@@ -401,6 +480,22 @@ class Player {
       ctx.restore();
     }
 
+    // 무선 마우스 그리기
+    if (skills.mouse > 0) {
+      const count = skills.mouse;
+      const radius = 60 + skills.mouse * 5;
+      ctx.font = '20px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < count; i++) {
+        const angle = this.mouseAngle + (Math.PI * 2 / count) * i;
+        const mx = this.x + Math.cos(angle) * radius;
+        const my = this.y + Math.sin(angle) * radius;
+        ctx.fillText('🖱️', mx, my);
+      }
+    }
+
+    // 쉴드 그리기
     if (this.shieldActive) {
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.size + 12, 0, Math.PI * 2);
@@ -412,6 +507,7 @@ class Player {
       ctx.shadowBlur = 0;
     }
 
+    // 캐릭터 그리기
     const bounce = Math.sin(this.engine.frameCount * 0.1) * 3;
     ctx.font = '32px Arial';
     ctx.textAlign = 'center';
@@ -449,13 +545,15 @@ class Player {
 }
 
 class Enemy {
-  constructor(type, playerX, playerY, maxScreenDim, progress) {
+  constructor(type, playerX, playerY, maxScreenDim, progress, day) {
+    this.id = Math.random(); // 타격 판별용 고유 ID
     const angle = Math.random() * Math.PI * 2;
     const dist = maxScreenDim * 0.6;
     this.x = playerX + Math.cos(angle) * dist;
     this.y = playerY + Math.sin(angle) * dist;
+    this.type = type;
 
-    const diff = 1 + progress * 2.5;
+    const diff = 1 + progress * 2.5 + (day - 1) * 0.5;
 
     if (type === 'spam') {
       this.emoji = '📧'; this.size = 15;
@@ -465,7 +563,13 @@ class Enemy {
       this.emoji = '💬'; this.size = 18;
       this.hp = 2.5 * diff; this.speed = 2.2 + Math.random();
       this.xpValue = 2; this.particleColor = '#60a5fa';
-    } else {
+      this.stateTimer = 0;
+    } else if (type === 'bug') {
+      this.emoji = '🐛'; this.size = 14;
+      this.hp = 2.0 * diff; this.speed = 2.5 + Math.random();
+      this.xpValue = 1; this.particleColor = '#84cc16';
+      this.waveTimer = Math.random() * Math.PI * 2;
+    } else { // folder
       this.emoji = '🗂️'; this.size = 25;
       this.hp = 6 * diff; this.speed = 0.8 + Math.random() * 0.5;
       this.xpValue = 5; this.particleColor = '#fbbf24';
@@ -473,10 +577,33 @@ class Enemy {
     this.maxHp = this.hp;
   }
 
-  update(player) {
+  update(player, dt) {
     const angle = Math.atan2(player.y - this.y, player.x - this.x);
-    this.x += Math.cos(angle) * this.speed;
-    this.y += Math.sin(angle) * this.speed;
+
+    if (this.type === 'slack') { // 대시 몹 패턴
+      this.stateTimer += dt;
+      if (this.stateTimer < 60) {
+        // 천천히 이동하며 조준
+        this.x += Math.cos(angle) * this.speed * 0.4 * dt;
+        this.y += Math.sin(angle) * this.speed * 0.4 * dt;
+        this.dashAngle = angle;
+      } else if (this.stateTimer < 80) {
+        // 고정된 각도로 빠르게 대시
+        this.x += Math.cos(this.dashAngle) * this.speed * 4.0 * dt;
+        this.y += Math.sin(this.dashAngle) * this.speed * 4.0 * dt;
+      } else {
+        this.stateTimer = 0;
+      }
+    } else if (this.type === 'bug') { // 사인파 지그재그 패턴
+      this.waveTimer += 0.1 * dt;
+      const waveAngle = angle + Math.PI / 2;
+      const waveAmp = Math.sin(this.waveTimer) * 3.5;
+      this.x += (Math.cos(angle) * this.speed + Math.cos(waveAngle) * waveAmp) * dt;
+      this.y += (Math.sin(angle) * this.speed + Math.sin(waveAngle) * waveAmp) * dt;
+    } else { // 일반 추적
+      this.x += Math.cos(angle) * this.speed * dt;
+      this.y += Math.sin(angle) * this.speed * dt;
+    }
   }
 
   draw(ctx) {
@@ -493,16 +620,19 @@ class Enemy {
 }
 
 class Projectile {
-  constructor(x, y, angle, speed, damage, emoji = '☕') {
+  constructor(x, y, angle, speed, damage, emoji = '☕', pierce = 1) {
     this.x = x; this.y = y;
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
     this.damage = damage;
     this.size = 10;
     this.emoji = emoji;
+    this.pierce = pierce; // 관통 가능 횟수
+    this.hitIds = new Set();
   }
-  update() {
-    this.x += this.vx; this.y += this.vy;
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
   }
   draw(ctx) {
     ctx.font = '22px Arial';
@@ -525,13 +655,13 @@ class XPGem {
     this.value = value;
     this.size = 8;
   }
-  update(player) {
+  update(player, dt) {
     const skills = player.engine.getSkills();
     const dist = Math.hypot(player.x - this.x, player.y - this.y);
     if (dist < 120 + (skills.magnet * 60)) {
       const angle = Math.atan2(player.y - this.y, player.x - this.x);
-      this.x += Math.cos(angle) * 7;
-      this.y += Math.sin(angle) * 7;
+      this.x += Math.cos(angle) * 7 * dt;
+      this.y += Math.sin(angle) * 7 * dt;
     }
     if (dist < player.size + this.size) {
       player.gainXp(this.value);
@@ -566,13 +696,14 @@ class Particle {
     this.color = color;
     this.size = Math.random() * 3 + 2;
   }
-  update() {
-    this.x += this.vx; this.y += this.vy;
-    this.life -= this.decay;
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.life -= this.decay * dt;
     return this.life > 0;
   }
   draw(ctx) {
-    ctx.globalAlpha = this.life;
+    ctx.globalAlpha = Math.max(0, this.life);
     ctx.fillStyle = this.color;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
@@ -589,13 +720,13 @@ class FloatingText {
     this.color = color;
     this.life = 1.0;
   }
-  update() {
-    this.y -= 1.5;
-    this.life -= 0.03;
+  update(dt) {
+    this.y -= 1.5 * dt;
+    this.life -= 0.03 * dt;
     return this.life > 0;
   }
   draw(ctx) {
-    ctx.globalAlpha = this.life;
+    ctx.globalAlpha = Math.max(0, this.life);
     ctx.fillStyle = this.color;
     ctx.font = 'bold 18px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
@@ -609,10 +740,13 @@ class FloatingText {
 
 export default function App() {
   const [gameState, setGameState] = useState('START');
+  const [day, setDay] = useState(1);
   const [hp, setHp] = useState(10);
   const [time, setTime] = useState(540);
   const [xpData, setXpData] = useState({ xp: 0, maxXp: 8, level: 1 });
-  const [skills, setSkills] = useState({ coffee: 1, vlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0 });
+  
+  // 모든 스킬 초기값 추가
+  const [skills, setSkills] = useState({ coffee: 1, vlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0, stapler: 0, mouse: 0 });
   const [levelUpChoices, setLevelUpChoices] = useState([]);
 
   const canvasRef = useRef(null);
@@ -631,11 +765,12 @@ export default function App() {
     return `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')} ${period}`;
   };
 
-  const startGame = useCallback(() => {
-    setHp(10);
+  const startDay = useCallback((currentDay, currentHp, currentXpData, currentSkills) => {
+    setDay(currentDay);
+    setHp(currentHp);
     setTime(540);
-    setXpData({ xp: 0, maxXp: 8, level: 1 });
-    setSkills({ coffee: 1, vlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0 });
+    setXpData(currentXpData);
+    setSkills(currentSkills);
     setGameState('PLAYING');
 
     if (engineRef.current) engineRef.current.destroy();
@@ -647,23 +782,39 @@ export default function App() {
         onXpChange: (xp, maxXp, level) => setXpData({ xp, maxXp, level }),
         onTimeChange: setTime,
         onGameOver: () => setGameState('GAMEOVER'),
-        onWin: () => setGameState('WIN'),
+        onWin: () => {
+          if (currentDay >= 10) {
+            setGameState('WIN');
+          } else {
+            setGameState('DAYCLEAR');
+          }
+        },
         onLevelUp: () => {
           engine.pause();
           const current = skillsRef.current;
-          const available = Object.keys(SKILLS).filter(k => current[k] < SKILLS[k].max);
+          const available = Object.keys(SKILLS).filter(k => current[k] < SKILLS[k].max && SKILLS[k].unlockDay <= currentDay);
           const shuffled = available.sort(() => 0.5 - Math.random());
           const choices = shuffled.slice(0, 3);
           setLevelUpChoices(choices.length > 0 ? choices : ['heal']);
           setGameState('LEVELUP');
         }
       },
-      () => skillsRef.current
+      () => skillsRef.current,
+      currentDay,
+      { hp: currentHp, xp: currentXpData.xp, maxXp: currentXpData.maxXp, level: currentXpData.level }
     );
 
     engineRef.current = engine;
     engine.start();
   }, []);
+
+  const startGame = useCallback(() => {
+    startDay(1, 10, { xp: 0, maxXp: 8, level: 1 }, { coffee: 1, vlookup: 0, shield: 0, speed: 0, keyboard: 0, magnet: 0, stapler: 0, mouse: 0 });
+  }, [startDay]);
+
+  const nextDay = useCallback(() => {
+    startDay(day + 1, hp, xpData, skills);
+  }, [day, hp, xpData, skills, startDay]);
 
   const selectSkill = (skillId) => {
     if (skillId === 'heal') {
@@ -691,6 +842,7 @@ export default function App() {
           <div className="flex justify-between items-start">
             <div className="backdrop-blur-md bg-slate-800/60 p-3 rounded-xl border border-slate-600/50 shadow-lg pointer-events-auto">
               <div className="flex items-center gap-2 mb-1">
+                <span className="bg-blue-600 text-white text-xs font-black px-2 py-0.5 rounded mr-1">DAY {day}</span>
                 <Clock className="w-5 h-5 text-amber-400" />
                 <span className="text-2xl font-black text-amber-400 tracking-wider">
                   {formatTime(time)}
@@ -736,12 +888,12 @@ export default function App() {
                   <span><b className="text-white">드래그 & 방향키</b>로 이동하세요.</span>
                 </p>
                 <p className="flex items-center gap-3 text-sm text-slate-300">
-                  <span className="p-2 bg-slate-800 rounded-lg"><span className="text-xl">☕</span></span>
-                  <span>가장 가까운 적에게 <b>자동 공격</b>합니다.</span>
+                  <span className="p-2 bg-slate-800 rounded-lg"><span className="text-xl">📅</span></span>
+                  <span>총 <b className="text-white">10일차(10 스테이지)</b>까지 버텨야 합니다.</span>
                 </p>
                 <p className="flex items-center gap-3 text-sm text-slate-300">
-                  <span className="p-2 bg-slate-800 rounded-lg"><span className="text-xl">📄</span></span>
-                  <span>서류를 주워 <b>레벨업</b>하고 스킬을 얻으세요.</span>
+                  <span className="p-2 bg-slate-800 rounded-lg"><span className="text-xl">🔓</span></span>
+                  <span>생존 일차가 오를수록 <b>새로운 스킬이 해제</b>됩니다.</span>
                 </p>
               </div>
 
@@ -809,7 +961,7 @@ export default function App() {
             <div className="bg-slate-800/90 border border-slate-600 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
               <Skull className="w-16 h-16 text-red-500 mx-auto mb-4 animate-pulse" />
               <h2 className="text-4xl font-black mb-2 text-red-500">야근 확정...</h2>
-              <p className="mb-6 text-slate-400 text-lg">업무 스트레스로 쓰러졌습니다.<br/>버틴 시간: <b className="text-white">{formatTime(time)}</b></p>
+              <p className="mb-6 text-slate-400 text-lg">업무 스트레스로 쓰러졌습니다.<br/>도달 기록: <b className="text-white">DAY {day} - {formatTime(time)}</b></p>
               
               <button
                 onClick={startGame}
@@ -824,15 +976,31 @@ export default function App() {
           {gameState === 'WIN' && (
             <div className="bg-slate-800/90 border border-emerald-600/50 p-8 rounded-2xl shadow-[0_0_40px_rgba(16,185,129,0.3)] max-w-md w-full text-center">
               <Trophy className="w-20 h-20 text-yellow-400 mx-auto mb-4 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]" />
-              <h2 className="text-4xl font-black mb-2 text-emerald-400">칼퇴 성공! 🎉</h2>
-              <p className="mb-8 text-slate-300 text-lg">무사히 18:00를 맞이했습니다.<br/>오늘도 고생하셨습니다!</p>
+              <h2 className="text-4xl font-black mb-2 text-emerald-400">최종 클리어! 🎉</h2>
+              <p className="mb-8 text-slate-300 text-lg">지옥 같은 10일을 버티고 휴가를 획득했습니다.<br/>당신은 진정한 오피스 서바이버!</p>
               
               <button
                 onClick={startGame}
                 className="w-full flex justify-center items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-all active:scale-95"
               >
                 <RefreshCw className="w-5 h-5" />
-                <span>내일 다시 출근하기</span>
+                <span>처음부터 다시 도전하기</span>
+              </button>
+            </div>
+          )}
+
+          {gameState === 'DAYCLEAR' && (
+            <div className="bg-slate-800/90 border border-blue-500/50 p-8 rounded-2xl shadow-[0_0_40px_rgba(59,130,246,0.3)] max-w-md w-full text-center">
+              <Trophy className="w-16 h-16 text-blue-400 mx-auto mb-4 drop-shadow-[0_0_15px_rgba(96,165,250,0.5)]" />
+              <h2 className="text-4xl font-black mb-2 text-blue-400">DAY {day} 퇴근 성공!</h2>
+              <p className="mb-8 text-slate-300 text-lg">오늘 하루도 무사히 넘겼습니다.<br/>하지만 내일도 출근해야 합니다...</p>
+              
+              <button
+                onClick={nextDay}
+                className="w-full flex justify-center items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-all active:scale-95"
+              >
+                <Play className="w-5 h-5" />
+                <span>DAY {day + 1} 출근하기</span>
               </button>
             </div>
           )}
